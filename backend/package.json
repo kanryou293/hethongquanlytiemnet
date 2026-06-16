@@ -1,0 +1,21 @@
+{
+  "name": "knight-tree-net-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Backend API for Knight Tree Net",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "pg": "^8.11.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "bcrypt": "^5.1.1"
+  }
+}
