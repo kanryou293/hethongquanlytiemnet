@@ -14,6 +14,7 @@ import topUpRoutes from './routes/topUp.js';
 import staffRoutes from './routes/staff.js';
 import systemLogsRoutes from './routes/systemLogs.js';
 import expensesRoutes from './routes/expenses.js';
+import inventoryImportsRoutes from './routes/inventoryImports.js';
 
 dotenv.config();
 
@@ -22,8 +23,10 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
-  credentials: true
+  origin: true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -62,6 +65,7 @@ app.use('/api/top-up', topUpRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/system-logs', systemLogsRoutes);
 app.use('/api/expenses', expensesRoutes);
+app.use('/api/inventory-imports', inventoryImportsRoutes);
 
 // 404 handler
 app.use((req, res) => {

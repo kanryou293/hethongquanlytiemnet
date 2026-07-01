@@ -12,8 +12,13 @@ function Reports() {
   const [menuItems, setMenuItems] = useState([]);
   const [memberships, setMemberships] = useState([]);
   const [expensesSummary, setExpensesSummary] = useState([]);
+  const [rangeExpenses, setRangeExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [dateRange, setDateRange] = useState('today');
+  const [dateRange, setDateRange] = useState('week');
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const defaultDate = new Date();
+    return `${defaultDate.getFullYear()}-${String(defaultDate.getMonth() + 1).padStart(2, '0')}`;
+  });
 
   // Fetch data from API
   useEffect(() => {
@@ -26,7 +31,7 @@ function Reports() {
           api.users.getAll(),
           api.menuItems.getAll(),
           api.memberships.getAll(),
-          api.expenses.getSummaryByCategory()
+          api.expenses.getSummaryByCategory(),
         ]);
         setSessions(sessionsData);
         setOrders(ordersData);
@@ -34,9 +39,17 @@ function Reports() {
         setMenuItems(menuItemsData);
         setMemberships(membershipsData);
         setExpensesSummary(expensesData);
+        setRangeExpenses(expensesData);
       } catch (error) {
         console.error('Error fetching data:', error);
         toast.error('Lỗi tải dữ liệu báo cáo');
+        setSessions([]);
+        setOrders([]);
+        setUsers([]);
+        setMenuItems([]);
+        setMemberships([]);
+        setExpensesSummary([]);
+        setRangeExpenses([]);
       } finally {
         setLoading(false);
       }
@@ -45,50 +58,198 @@ function Reports() {
     fetchData();
   }, []);
 
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const getRangeBounds = (range) => {
+    const start = new Date(startOfToday);
+    const end = new Date(startOfToday);
+
+    if (range === 'week') {
+      start.setDate(start.getDate() - 6);
+      end.setDate(end.getDate() + 1);
+    } else if (range === 'month') {
+      const [year, month] = selectedMonth.split('-').map(Number);
+      if (!Number.isNaN(year) && !Number.isNaN(month)) {
+        start.setFullYear(year, month - 1, 1);
+        end.setFullYear(year, month, 1);
+      } else {
+        start.setDate(1);
+        end.setDate(end.getDate() + 1);
+      }
+    } else if (range === 'all') {
+      start.setFullYear(1970, 0, 1);
+      end.setDate(end.getDate() + 1);
+    } else {
+      end.setDate(end.getDate() + 1);
+    }
+
+    return { start, end };
+  };
+
+  const { start: startDate, end: endDate } = getRangeBounds(dateRange);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const fetchRangeExpenses = async () => {
+      try {
+        const startDateStr = startDate.toISOString().split('T')[0];
+        const endDateStr = new Date(endDate.getTime() - 1).toISOString().split('T')[0];
+        const expensesData = await api.expenses.getByRange(startDateStr, endDateStr, controller.signal);
+        setRangeExpenses(expensesData || []);
+      } catch (error) {
+        if (error.name === 'AbortError') return;
+        console.error('Error fetching range expenses:', error);
+        setRangeExpenses([]);
+      }
+    };
+
+    fetchRangeExpenses();
+
+    return () => controller.abort();
+  }, [startDate, endDate]);
+
+  const filteredSessions = sessions.filter((s) => {
+    const sessionDate = new Date(s.starttime);
+    return sessionDate >= startDate && sessionDate < endDate;
+  });
+
+  const filteredOrders = orders.filter((o) => {
+    const orderDate = new Date(o.order_time);
+    return orderDate >= startDate && orderDate < endDate;
+  });
+
+  const menuItemCostMap = menuItems.reduce((map, item) => {
+    map[item.item_id] = Number(item.current_cost || 0);
+    return map;
+  }, {});
+
+  const foodCost = filteredOrders.reduce((sum, order) => {
+    if (!Array.isArray(order.items)) return sum;
+    return order.items.reduce((orderSum, item) => {
+      const quantity = Number(item.quantity || 0);
+      const costPerUnit = menuItemCostMap[item.item_id] ?? Number(item.current_cost || 0);
+      return orderSum + quantity * (Number.isNaN(costPerUnit) ? 0 : costPerUnit);
+    }, sum);
+  }, 0);
+
+  const otherExpense = rangeExpenses.reduce((sum, exp) => sum + (Number(exp.amount || exp.total_amount || 0)), 0);
+
   // Calculate revenue from sessions
-  const sessionRevenue = sessions.reduce((sum, s) => {
+  const sessionRevenue = filteredSessions.reduce((sum, s) => {
     if (s.endtime) return sum + (s.cost || 0);
     return sum + calculateSessionCost(s.starttime, s.hourly_rate || 3000, s.discount_rate || 0);
   }, 0);
 
   // Calculate revenue from orders
-  const orderRevenue = orders.reduce((sum, o) => sum + o.total_amount, 0);
+  const orderRevenue = filteredOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
   const totalRevenue = sessionRevenue + orderRevenue;
+  const actualRevenue = Math.max(0, totalRevenue - foodCost - (dateRange === 'month' ? otherExpense : 0));
 
   // Average session duration
-  const avgSessionDuration = sessions.length > 0
-    ? sessions.reduce((sum, s) => {
+  const avgSessionDuration = filteredSessions.length > 0
+    ? filteredSessions.reduce((sum, s) => {
         const start = new Date(s.starttime);
         const end = s.endtime ? new Date(s.endtime) : new Date();
         return sum + (end - start) / (1000 * 60 * 60);
-      }, 0) / sessions.length
+      }, 0) / filteredSessions.length
     : 0;
 
-  // Top selling item (simplified - would need order_details from backend)
-  const topItem = menuItems[0]; // Placeholder
+  const orderItems = filteredOrders.flatMap((o) => Array.isArray(o.items) ? o.items : []);
+  const itemStats = orderItems.reduce((stats, item) => {
+    const key = item.item_id || item.itemId || item.id;
+    if (!key) return stats;
 
-  // Daily revenue data (mock)
-  const dailyRevenueData = [
-    { date: '20/05', revenue: 2500000 },
-    { date: '21/05', revenue: 2800000 },
-    { date: '22/05', revenue: 2300000 },
-    { date: '23/05', revenue: 3100000 },
-    { date: '24/05', revenue: 2900000 },
-    { date: '25/05', revenue: 3400000 },
-    { date: '26/05', revenue: totalRevenue },
-  ];
+    const quantity = Number(item.quantity || 0);
+    const revenue = quantity * Number(item.unit_price || 0);
 
-  // Hourly revenue data (mock)
-  const hourlyRevenueData = [
-    { hour: '00:00', revenue: 50000 },
-    { hour: '03:00', revenue: 30000 },
-    { hour: '06:00', revenue: 80000 },
-    { hour: '09:00', revenue: 250000 },
-    { hour: '12:00', revenue: 450000 },
-    { hour: '15:00', revenue: 380000 },
-    { hour: '18:00', revenue: 520000 },
-    { hour: '21:00', revenue: 680000 },
-  ];
+    if (!stats[key]) {
+      stats[key] = {
+        item_id: key,
+        name: item.item_name || item.name || 'Không rõ',
+        quantity: 0,
+        revenue: 0,
+      };
+    }
+
+    stats[key].quantity += quantity;
+    stats[key].revenue += revenue;
+    return stats;
+  }, {});
+
+  const topItems = Object.values(itemStats)
+    .sort((a, b) => b.quantity - a.quantity || b.revenue - a.revenue);
+
+  const topItem = topItems[0] || null;
+
+  // Build daily revenue chart for the last 7 days
+  const dailyRevenueData = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(startOfToday);
+    date.setDate(date.getDate() - (6 - index));
+
+    const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+
+    const sessionsForDay = sessions.filter((s) => {
+      const startTime = new Date(s.starttime);
+      return startTime >= dayStart && startTime < dayEnd;
+    });
+
+    const ordersForDay = orders.filter((o) => {
+      const orderTime = new Date(o.order_time);
+      return orderTime >= dayStart && orderTime < dayEnd;
+    });
+
+    const sessionsRevenueForDay = sessionsForDay.reduce((sum, s) => {
+      if (s.endtime) return sum + (s.cost || 0);
+      return sum + calculateSessionCost(s.starttime, s.hourly_rate || 3000, s.discount_rate || 0);
+    }, 0);
+
+    const ordersRevenueForDay = ordersForDay.reduce((sum, o) => sum + (o.total_amount || 0), 0);
+
+    return {
+      date: `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`,
+      revenue: sessionsRevenueForDay + ordersRevenueForDay,
+    };
+  });
+
+  // Build hourly revenue data for current day
+  const hourlyRevenueData = Array.from({ length: 24 }, (_, hour) => {
+    const label = `${String(hour).padStart(2, '0')}:00`;
+    return { hour: label, revenue: 0 };
+  });
+
+  const chartDailyRevenueData = dailyRevenueData.length > 0
+    ? dailyRevenueData.map((item) => ({ ...item, revenue: Number(item.revenue || 0) }))
+    : [{ date: 'N/A', revenue: 0 }];
+  const chartHourlyRevenueData = hourlyRevenueData.length > 0
+    ? hourlyRevenueData.map((item) => ({ ...item, revenue: Number(item.revenue || 0) }))
+    : [{ hour: '00:00', revenue: 0 }];
+
+  filteredSessions.forEach((s) => {
+    const hour = new Date(s.starttime).getHours();
+    const revenue = s.endtime
+      ? (s.cost || 0)
+      : calculateSessionCost(s.starttime, s.hourly_rate || 3000, s.discount_rate || 0);
+    hourlyRevenueData[hour].revenue += revenue;
+  });
+
+  filteredOrders.forEach((o) => {
+    const hour = new Date(o.order_time).getHours();
+    hourlyRevenueData[hour].revenue += (o.total_amount || 0);
+  });
+
+  const groupedHourlyRevenueData = Array.from({ length: 8 }, (_, index) => {
+    const startHour = index * 3;
+    const endHour = startHour + 3;
+    const label = `${String(startHour).padStart(2, '0')}:00`;
+    const revenue = hourlyRevenueData
+      .slice(startHour, endHour)
+      .reduce((sum, item) => sum + item.revenue, 0);
+    return { hour: label, revenue };
+  });
 
   // Revenue split data
   const revenueSplitData = [
@@ -96,10 +257,9 @@ function Reports() {
     { name: 'Đồ ăn/uống', value: orderRevenue, color: '#00b4ff' },
   ];
 
-  // Top menu items (simplified)
-  const topMenuItems = menuItems.slice(0, 5).map(item => ({
-    name: item.item_name,
-    sold: Math.floor(Math.random() * 100), // Placeholder
+  const topMenuItems = topItems.slice(0, 5).map((item) => ({
+    name: item.name,
+    sold: item.quantity,
   }));
 
   // Top customers
@@ -108,7 +268,7 @@ function Reports() {
       const userSessions = sessions.filter(s => s.user_id === user.user_id);
       const userOrders = orders.filter(o => o.user_id === user.user_id);
       const sessionCost = userSessions.reduce((sum, s) => sum + (s.cost || 0), 0);
-      const orderCost = userOrders.reduce((sum, o) => sum + o.total_amount, 0);
+      const orderCost = userOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
       return {
         ...user,
         totalSpent: sessionCost + orderCost,
@@ -117,13 +277,49 @@ function Reports() {
     .sort((a, b) => b.totalSpent - a.totalSpent)
     .slice(0, 10);
 
-  // Mock expenses data (backend doesn't have expenses API yet)
   const expensesData = expensesSummary
     .filter(item => item.total_amount > 0)
     .map(item => ({
       category: item.category_name,
-      amount: parseInt(item.total_amount)
+      amount: Number(item.total_amount || 0),
     }));
+
+  // Debug: log chart data to browser console to troubleshoot missing bars
+  try {
+    // eslint-disable-next-line no-console
+    console.debug('Reports: dailyRevenueData', dailyRevenueData);
+    // eslint-disable-next-line no-console
+    console.debug('Reports: hourlyRevenueData', hourlyRevenueData);
+    // eslint-disable-next-line no-console
+    console.debug('Reports: groupedHourlyRevenueData', groupedHourlyRevenueData);
+    // eslint-disable-next-line no-console
+    console.debug('Reports: revenueSplitData', revenueSplitData);
+    // eslint-disable-next-line no-console
+    console.debug('Reports: topMenuItems', topMenuItems);
+    // eslint-disable-next-line no-console
+    console.debug('Reports: expensesData', expensesData);
+  } catch (e) {
+    // ignore console failures in some environments
+  }
+
+  // Normalize chart data and force remount keys to ensure Recharts redraws
+  const normalizeChartNumbers = (arr = [], keys = []) => (
+    Array.isArray(arr) ? arr.map((it) => {
+      const copy = { ...it };
+      keys.forEach((k) => { copy[k] = Number(copy[k] || 0); });
+      return copy;
+    }) : []
+  );
+
+  const dailyRevenueDataNormalized = normalizeChartNumbers(dailyRevenueData, ['revenue']);
+  const hourlyRevenueDataNormalized = normalizeChartNumbers(hourlyRevenueData, ['revenue']);
+  const groupedHourlyRevenueDataNormalized = normalizeChartNumbers(groupedHourlyRevenueData, ['revenue']);
+  const topMenuItemsNormalized = normalizeChartNumbers(topMenuItems, ['sold']);
+  const expensesDataNormalized = normalizeChartNumbers(expensesData, ['amount']);
+
+  const chartRevenueSplitData = revenueSplitData.length > 0 ? revenueSplitData : [{ name: 'Không có dữ liệu', value: 1, color: '#6b7280' }];
+  const chartTopMenuItems = topMenuItems.length > 0 ? topMenuItems : [{ name: 'Không có dữ liệu', sold: 1 }];
+  const chartExpensesData = expensesData.length > 0 ? expensesData : [{ category: 'Không có dữ liệu', amount: 1 }];
 
   // Mock memberships for display - now using real data from API
 
@@ -145,8 +341,8 @@ function Reports() {
         </div>
 
         {/* Date Range Selector */}
-        <div className="flex gap-2">
-          {['today', 'week', 'month', 'custom'].map((range) => (
+        <div className="flex flex-wrap gap-2 items-center">
+          {['week', 'month', 'all'].map((range) => (
             <button
               key={range}
               onClick={() => setDateRange(range)}
@@ -156,9 +352,53 @@ function Reports() {
                   : 'bg-cyber-border text-gray-400 hover:bg-cyber-border/70'
               }`}
             >
-              {range === 'today' ? 'Hôm nay' : range === 'week' ? 'Tuần này' : range === 'month' ? 'Tháng này' : 'Tùy chỉnh'}
+              {range === 'week' ? 'Tuần' : range === 'month' ? 'Tháng' : 'Tất cả'}
             </button>
           ))}
+          {dateRange === 'month' && (
+            <input
+              type="month"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="px-4 py-2 rounded bg-cyber-border text-gray-200 font-rajdhani outline-none border border-cyber-border focus:border-cyber-green"
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Top Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-cyber-card border border-cyber-border rounded-lg p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-gray-400 text-sm font-rajdhani">Chi phí đồ ăn</p>
+              <p className="text-2xl font-jetbrains font-bold text-cyber-red mt-2">
+                {formatVND(foodCost)}
+              </p>
+            </div>
+            <div className="p-3 bg-cyber-red/20 rounded-lg">
+              <ShoppingCart className="text-cyber-red" size={24} />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-cyber-card border border-cyber-border rounded-lg p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-gray-400 text-sm font-rajdhani">Doanh thu thực</p>
+              <p className="text-2xl font-jetbrains font-bold text-cyber-green mt-2">
+                {formatVND(actualRevenue)}
+              </p>
+            </div>
+            <div className="p-3 bg-cyber-green/20 rounded-lg">
+              <DollarSign className="text-cyber-green" size={24} />
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 mt-3">
+            {dateRange === 'month'
+              ? 'Đã trừ chi phí điện, nước, khác và đồ ăn'
+              : 'Đã trừ chi phí đồ ăn'}
+          </p>
         </div>
       </div>
 
@@ -211,7 +451,7 @@ function Reports() {
             <div>
               <p className="text-gray-400 text-sm font-rajdhani">Món bán chạy</p>
               <p className="text-lg font-rajdhani font-bold text-cyber-green mt-2">
-                {topItem?.item_name || 'N/A'}
+                {topItem?.name || 'N/A'}
               </p>
             </div>
             <div className="p-3 bg-cyber-green/20 rounded-lg">
@@ -221,112 +461,7 @@ function Reports() {
         </div>
       </div>
 
-      {/* Charts Row 1 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Daily Revenue Chart */}
-        <div className="bg-cyber-card border border-cyber-border rounded-lg p-6">
-          <h2 className="text-xl font-orbitron font-bold text-gray-200 mb-4">DOANH THU THEO NGÀY</h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={dailyRevenueData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-              <XAxis dataKey="date" stroke="#9ca3af" style={{ fontSize: '12px', fontFamily: 'JetBrains Mono' }} />
-              <YAxis stroke="#9ca3af" style={{ fontSize: '12px', fontFamily: 'JetBrains Mono' }} />
-              <Tooltip
-                contentStyle={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '8px' }}
-                labelStyle={{ color: '#9ca3af', fontFamily: 'Rajdhani' }}
-                itemStyle={{ color: '#00ff88', fontFamily: 'JetBrains Mono' }}
-                formatter={(value) => formatVND(value)}
-              />
-              <Line type="monotone" dataKey="revenue" stroke="#00ff88" strokeWidth={2} dot={{ fill: '#00ff88' }} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Hourly Revenue Chart */}
-        <div className="bg-cyber-card border border-cyber-border rounded-lg p-6">
-          <h2 className="text-xl font-orbitron font-bold text-gray-200 mb-4">DOANH THU THEO GIỜ</h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={hourlyRevenueData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-              <XAxis dataKey="hour" stroke="#9ca3af" style={{ fontSize: '12px', fontFamily: 'JetBrains Mono' }} />
-              <YAxis stroke="#9ca3af" style={{ fontSize: '12px', fontFamily: 'JetBrains Mono' }} />
-              <Tooltip
-                contentStyle={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '8px' }}
-                labelStyle={{ color: '#9ca3af', fontFamily: 'Rajdhani' }}
-                itemStyle={{ color: '#00b4ff', fontFamily: 'JetBrains Mono' }}
-                formatter={(value) => formatVND(value)}
-              />
-              <Bar dataKey="revenue" fill="#00b4ff" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Charts Row 2 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Revenue Split */}
-        <div className="bg-cyber-card border border-cyber-border rounded-lg p-6">
-          <h2 className="text-xl font-orbitron font-bold text-gray-200 mb-4">PHÂN BỔ DOANH THU</h2>
-          <ResponsiveContainer width="100%" height={250}>
-            <PieChart>
-              <Pie
-                data={revenueSplitData}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                outerRadius={80}
-                fill="#8884d8"
-                dataKey="value"
-              >
-                {revenueSplitData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip
-                contentStyle={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '8px' }}
-                itemStyle={{ fontFamily: 'JetBrains Mono' }}
-                formatter={(value) => formatVND(value)}
-              />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Top Menu Items */}
-        <div className="bg-cyber-card border border-cyber-border rounded-lg p-6">
-          <h2 className="text-xl font-orbitron font-bold text-gray-200 mb-4">TOP 5 MÓN BÁN CHẠY</h2>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={topMenuItems} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-              <XAxis type="number" stroke="#9ca3af" style={{ fontSize: '12px', fontFamily: 'JetBrains Mono' }} />
-              <YAxis type="category" dataKey="name" stroke="#9ca3af" style={{ fontSize: '12px', fontFamily: 'Rajdhani' }} width={100} />
-              <Tooltip
-                contentStyle={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '8px' }}
-                itemStyle={{ color: '#00ff88', fontFamily: 'JetBrains Mono' }}
-              />
-              <Bar dataKey="sold" fill="#00ff88" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Expenses by Category */}
-        <div className="bg-cyber-card border border-cyber-border rounded-lg p-6">
-          <h2 className="text-xl font-orbitron font-bold text-gray-200 mb-4">CHI PHÍ THEO LOẠI</h2>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={expensesData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-              <XAxis dataKey="category" stroke="#9ca3af" style={{ fontSize: '10px', fontFamily: 'Rajdhani' }} angle={-45} textAnchor="end" height={80} />
-              <YAxis stroke="#9ca3af" style={{ fontSize: '12px', fontFamily: 'JetBrains Mono' }} />
-              <Tooltip
-                contentStyle={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '8px' }}
-                itemStyle={{ color: '#ffaa00', fontFamily: 'JetBrains Mono' }}
-                formatter={(value) => formatVND(value)}
-              />
-              <Bar dataKey="amount" fill="#ffaa00" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+      {/* Charts removed as requested */}
 
       {/* Top Customers Table */}
       <div>

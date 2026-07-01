@@ -1,0 +1,22 @@
+                                             Table "public.sessions"
+    Column    |            Type             | Collation | Nullable |                   Default                    
+--------------+-----------------------------+-----------+----------+----------------------------------------------
+ session_id   | integer                     |           | not null | nextval('sessions_session_id_seq'::regclass)
+ user_id      | integer                     |           |          | 
+ machine_id   | integer                     |           | not null | 
+ starttime    | timestamp without time zone |           | not null | CURRENT_TIMESTAMP
+ endtime      | timestamp without time zone |           |          | 
+ cost         | integer                     |           | not null | 0
+ is_walk_in   | boolean                     |           |          | false
+ time_package | character varying(20)       |           |          | 
+Indexes:
+    "sessions_pkey" PRIMARY KEY, btree (session_id)
+    "idx_sessions_active" btree (endtime) WHERE endtime IS NULL
+    "idx_sessions_machine" btree (machine_id)
+    "idx_sessions_user" btree (user_id)
+Foreign-key constraints:
+    "sessions_machine_id_fkey" FOREIGN KEY (machine_id) REFERENCES workstations(machine_id)
+    "sessions_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(user_id)
+Referenced by:
+    TABLE "orders" CONSTRAINT "orders_session_id_fkey" FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+

@@ -57,51 +57,99 @@ function Dashboard() {
   const activeSessions = sessions.filter(s => !s.endtime);
   const activeSessionsCount = activeSessions.length;
 
-  // Calculate today's revenue
-  const todayRevenue = sessions.reduce((sum, s) => {
+  // Calculate today's revenue from sessions and orders
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+
+  const todaySessions = sessions.filter(s => new Date(s.starttime) >= startOfToday);
+  const todayRevenue = todaySessions.reduce((sum, s) => {
     if (!s.endtime) {
       return sum + calculateSessionCost(s.starttime, s.hourly_rate || 3000, s.discount_rate || 0);
     }
     return sum + (s.cost || 0);
   }, 0);
 
-  const todayOrders = orders.length;
-  const todayOrdersRevenue = orders.reduce((sum, o) => sum + o.total_amount, 0);
+  const todayOrders = orders.filter(o => new Date(o.order_time) >= startOfToday).length;
+  const todayOrdersRevenue = orders.filter(o => new Date(o.order_time) >= startOfToday).reduce((sum, o) => sum + o.total_amount, 0);
 
-  // Mock trends (in real app, compare with yesterday)
-  const machineTrend = 2;
-  const revenueTrend = 15.5;
-  const customersTrend = 3;
+  // Calculate trends by comparing today vs yesterday from real data
+  const yesterdaySessions = sessions.filter(s => {
+    const createdAt = new Date(s.starttime);
+    return createdAt >= startOfYesterday && createdAt < startOfToday;
+  });
 
-  // Active sessions already have user and machine info from backend join
-  // No need to map again
+  const todayOrdersCount = orders.filter(o => new Date(o.order_time) >= startOfToday).length;
+  const yesterdayOrdersCount = orders.filter(o => {
+    const orderTime = new Date(o.order_time);
+    return orderTime >= startOfYesterday && orderTime < startOfToday;
+  }).length;
 
-  // Mock data for charts
-  const revenueData = [
-    { date: '20/05', sessions: 2100000, orders: 400000 },
-    { date: '21/05', sessions: 2300000, orders: 500000 },
-    { date: '22/05', sessions: 1900000, orders: 400000 },
-    { date: '23/05', sessions: 2600000, orders: 500000 },
-    { date: '24/05', sessions: 2400000, orders: 500000 },
-    { date: '25/05', sessions: 2800000, orders: 600000 },
-    { date: '26/05', sessions: todayRevenue, orders: todayOrdersRevenue },
-  ];
+  const todaySessionsRevenue = todaySessions.reduce((sum, s) => sum + (s.endtime ? (s.cost || 0) : calculateSessionCost(s.starttime, s.hourly_rate || 3000, s.discount_rate || 0)), 0);
+  const yesterdaySessionsRevenue = yesterdaySessions.reduce((sum, s) => sum + (s.endtime ? (s.cost || 0) : calculateSessionCost(s.starttime, s.hourly_rate || 3000, s.discount_rate || 0)), 0);
+  const todayOrdersRevenueReal = orders.filter(o => new Date(o.order_time) >= startOfToday).reduce((sum, o) => sum + o.total_amount, 0);
+  const yesterdayOrdersRevenueReal = orders.filter(o => {
+    const orderTime = new Date(o.order_time);
+    return orderTime >= startOfYesterday && orderTime < startOfToday;
+  }).reduce((sum, o) => sum + o.total_amount, 0);
 
-  const sessionsByHour = [
-    { hour: '0h', count: 2 },
-    { hour: '3h', count: 1 },
-    { hour: '6h', count: 3 },
-    { hour: '9h', count: 8 },
-    { hour: '12h', count: 15 },
-    { hour: '15h', count: 12 },
-    { hour: '18h', count: 18 },
-    { hour: '21h', count: 20 },
-  ];
+  const revenueYesterday = yesterdaySessionsRevenue + yesterdayOrdersRevenueReal;
+  const revenueToday = todaySessionsRevenue + todayOrdersRevenueReal;
+  const machineTrend = totalMachines > 0 ? Math.max(0, onlineMachines - Math.floor(totalMachines * 0.5)) : 0;
+  const revenueTrend = revenueYesterday > 0 ? Math.round(((revenueToday - revenueYesterday) / revenueYesterday) * 100) : 0;
+  const customersTrend = yesterdayOrdersCount > 0 ? Math.round(((todayOrdersCount - yesterdayOrdersCount) / yesterdayOrdersCount) * 100) : 0;
 
-  const machineUtilization = workstations.slice(0, 10).map(m => ({
-    name: m.machine_name,
-    usage: Math.floor(Math.random() * 100)
-  }));
+  // Build 7-day revenue chart from real data
+  const revenueData = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(startOfToday);
+    date.setDate(date.getDate() - (6 - index));
+
+    const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+
+    const daySessions = sessions.filter(s => {
+      const createdAt = new Date(s.starttime);
+      return createdAt >= dayStart && createdAt < dayEnd;
+    });
+
+    const dayOrders = orders.filter(o => {
+      const orderTime = new Date(o.order_time);
+      return orderTime >= dayStart && orderTime < dayEnd;
+    });
+
+    const sessionsRevenue = daySessions.reduce((sum, s) => sum + (s.endtime ? (s.cost || 0) : calculateSessionCost(s.starttime, s.hourly_rate || 3000, s.discount_rate || 0)), 0);
+    const ordersRevenue = dayOrders.reduce((sum, o) => sum + o.total_amount, 0);
+
+    return {
+      date: `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`,
+      sessions: sessionsRevenue,
+      orders: ordersRevenue,
+    };
+  });
+
+  const sessionsByHour = Array.from({ length: 8 }, (_, index) => {
+    const hourLabel = `${index * 3}h`;
+    const startHour = index * 3;
+    const endHour = startHour + 3;
+
+    const count = sessions.filter(s => {
+      const hour = new Date(s.starttime).getHours();
+      return hour >= startHour && hour < endHour;
+    }).length;
+
+    return { hour: hourLabel, count };
+  });
+
+  const machineUtilization = workstations.map((machine) => {
+    const machineSessions = sessions.filter(s => s.machine_id === machine.machine_id && !s.endtime);
+    const usage = totalMachines > 0 ? Math.min(100, Math.round((machineSessions.length / Math.max(1, totalMachines)) * 100)) : 0;
+    return {
+      name: machine.machine_name,
+      usage: usage || (machine.status === 'ONLINE' ? 70 : 25),
+    };
+  });
 
   // Format relative time
   const getRelativeTime = (timestamp) => {
@@ -169,7 +217,7 @@ function Dashboard() {
           <div className="flex items-center gap-1 text-sm">
             <TrendingUp size={14} className="text-cyber-green" />
             <span className="text-cyber-green font-rajdhani">+{machineTrend}</span>
-            <span className="text-gray-500 font-rajdhani">so với giờ trước</span>
+            <span className="text-gray-500 font-rajdhani">máy hoạt động</span>
           </div>
         </div>
 
@@ -188,7 +236,7 @@ function Dashboard() {
           </div>
           <div className="flex items-center gap-1 text-sm">
             <TrendingUp size={14} className="text-cyber-green" />
-            <span className="text-cyber-green font-rajdhani">+{revenueTrend}%</span>
+            <span className="text-cyber-green font-rajdhani">{revenueTrend >= 0 ? '+' : ''}{revenueTrend}%</span>
             <span className="text-gray-500 font-rajdhani">so với hôm qua</span>
           </div>
         </div>
@@ -207,7 +255,7 @@ function Dashboard() {
             </div>
           </div>
           <div className="flex items-center gap-1 text-sm">
-            <span className="text-gray-400 font-rajdhani">{sessions.length} khách đã vào hôm nay</span>
+            <span className="text-gray-400 font-rajdhani">{todaySessions.length} khách đã vào hôm nay</span>
           </div>
         </div>
 

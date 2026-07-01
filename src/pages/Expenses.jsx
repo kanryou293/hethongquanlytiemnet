@@ -12,6 +12,10 @@ function Expenses() {
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [filterCategory, setFilterCategory] = useState('all');
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
@@ -88,13 +92,22 @@ function Expenses() {
     }
   };
 
-  const filteredExpenses = filterCategory === 'all'
+  const activeExpenses = selectedMonth === 'all'
     ? expenses
-    : expenses.filter(exp => exp.category_id === parseInt(filterCategory));
+    : expenses.filter(exp => {
+      if (!exp.expense_date) return false;
+      const d = new Date(exp.expense_date);
+      const [y, m] = selectedMonth.split('-').map(Number);
+      return d.getFullYear() === y && d.getMonth() + 1 === m;
+    });
+
+  const filteredExpenses = filterCategory === 'all'
+    ? activeExpenses
+    : activeExpenses.filter(exp => exp.category_id === parseInt(filterCategory));
 
   // Calculate expenses by category for chart
   const expensesByCategory = expenseCategories.map(category => {
-    const categoryExpenses = expenses.filter(exp => exp.category_id === category.category_id);
+    const categoryExpenses = activeExpenses.filter(exp => exp.category_id === category.category_id);
     const total = categoryExpenses.reduce((sum, exp) => sum + exp.amount, 0);
     return {
       category: category.category_name,
@@ -103,12 +116,7 @@ function Expenses() {
   }).filter(item => item.amount > 0);
 
   // Calculate monthly total
-  const monthlyTotal = expenses
-    .filter(exp => {
-      const expDate = new Date(exp.expense_date);
-      const now = new Date();
-      return expDate.getMonth() === now.getMonth() && expDate.getFullYear() === now.getFullYear();
-    })
+  const monthlyTotal = (selectedMonth === 'all' ? expenses : activeExpenses)
     .reduce((sum, exp) => sum + exp.amount, 0);
 
   const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
@@ -138,6 +146,21 @@ function Expenses() {
           <Plus size={20} />
           Thêm chi phí
         </button>
+        <div className="ml-4 flex items-center gap-2">
+          <label className="text-sm text-gray-400">Xem theo tháng</label>
+          <input
+            type="month"
+            value={selectedMonth === 'all' ? new Date().toISOString().slice(0,7) : selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="px-2 py-1 bg-cyber-border rounded text-gray-200"
+          />
+          <button
+            onClick={() => setSelectedMonth('all')}
+            className="px-3 py-1 bg-cyber-border text-gray-200 rounded hover:bg-cyber-border/80"
+          >
+            Tất cả
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}

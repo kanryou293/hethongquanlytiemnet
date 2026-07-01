@@ -1,14 +1,21 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Package, Plus, TrendingUp } from 'lucide-react';
-import { inventoryImports as initialInventoryImports, menuItems, staff } from '../data/mockData';
 import { formatVND } from '../utils/formatters';
+import api from '../services/api';
 
 function Inventory() {
-  const [imports, setImports] = useState(initialInventoryImports);
+  const [imports, setImports] = useState([]);
+  const [menuItems, setMenuItems] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [quantity, setQuantity] = useState('');
   const [importPrice, setImportPrice] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
 
   const getItemName = (itemId) => {
     const item = menuItems.find(i => i.item_id === itemId);
@@ -20,7 +27,30 @@ function Inventory() {
     return staffMember?.full_name || `Staff #${staffId}`;
   };
 
-  const handleSubmit = (e) => {
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const [importsData, menuItemsData, staffData] = await Promise.all([
+          api.inventoryImports.getAll(),
+          api.menuItems.getAll(),
+          api.staff.getAll(),
+        ]);
+        setImports(importsData);
+        setMenuItems(menuItemsData);
+        setStaff(staffData);
+      } catch (error) {
+        console.error('Error loading inventory data:', error);
+        alert('Lỗi tải dữ liệu nhập kho.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!selectedItem || !quantity || !importPrice) {
@@ -28,35 +58,41 @@ function Inventory() {
       return;
     }
 
-    const totalAmount = parseInt(quantity) * parseInt(importPrice);
+    const totalAmount = parseInt(quantity, 10) * parseInt(importPrice, 10);
 
-    const newImport = {
-      import_id: imports.length + 1,
-      staff_id: 1, // Mock staff ID
+    const payload = {
+      staff_id: 1, // TODO: replace with current authenticated staff
       item_id: selectedItem.item_id,
-      quantity: parseInt(quantity),
-      import_price: parseInt(importPrice),
-      total_amount: totalAmount,
-      created_at: new Date().toISOString()
+      quantity: parseInt(quantity, 10),
+      import_price: parseInt(importPrice, 10),
     };
 
-    setImports([newImport, ...imports]);
-    alert(`Nhập kho ${quantity} ${selectedItem.item_name} thành công!`);
+    try {
+      const result = await api.inventoryImports.create(payload);
+      setImports([result, ...imports]);
+      alert(`Nhập kho ${quantity} ${selectedItem.item_name} thành công!`);
 
-    // Reset form
-    setShowAddModal(false);
-    setSelectedItem(null);
-    setQuantity('');
-    setImportPrice('');
+      // Reset form
+      setShowAddModal(false);
+      setSelectedItem(null);
+      setQuantity('');
+      setImportPrice('');
+    } catch (error) {
+      console.error('Error creating inventory import:', error);
+      alert('Lỗi khi lưu nhập kho lên server.');
+    }
   };
 
-  const totalImportsThisMonth = imports
-    .filter(imp => {
-      const importDate = new Date(imp.created_at);
-      const now = new Date();
-      return importDate.getMonth() === now.getMonth() && importDate.getFullYear() === now.getFullYear();
-    })
-    .reduce((sum, imp) => sum + imp.total_amount, 0);
+  const activeImports = selectedMonth === 'all'
+    ? imports
+    : imports.filter(imp => {
+      if (!imp.created_at) return false;
+      const d = new Date(imp.created_at);
+      const [y, m] = selectedMonth.split('-').map(Number);
+      return d.getFullYear() === y && d.getMonth() + 1 === m;
+    });
+
+  const totalImportsThisMonth = activeImports.reduce((sum, imp) => sum + imp.total_amount, 0);
 
   return (
     <div className="space-y-6">
@@ -74,6 +110,21 @@ function Inventory() {
           <Plus size={20} />
           Nhập hàng
         </button>
+        <div className="ml-4 flex items-center gap-2">
+          <label className="text-sm text-gray-400">Xem theo tháng</label>
+          <input
+            type="month"
+            value={selectedMonth === 'all' ? new Date().toISOString().slice(0,7) : selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="px-2 py-1 bg-cyber-border rounded text-gray-200"
+          />
+          <button
+            onClick={() => setSelectedMonth('all')}
+            className="px-3 py-1 bg-cyber-border text-gray-200 rounded hover:bg-cyber-border/80"
+          >
+            Tất cả
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -211,6 +262,9 @@ function Inventory() {
                   ))}
                 </select>
               </div>
+              {loading && (
+                <p className="text-sm text-gray-400">Đang tải dữ liệu...</p>
+              )}
 
               {/* Quantity */}
               <div>

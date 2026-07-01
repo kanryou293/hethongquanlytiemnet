@@ -17,8 +17,6 @@ const menuItems = [
   { path: '/inventory', icon: Package, label: 'Nhập Kho' },
   { path: '/expenses', icon: Receipt, label: 'Chi Phí' },
   { path: '/staff', icon: UserCog, label: 'Nhân Viên' },
-  { path: '/machine-health', icon: Activity, label: 'Sức Khỏe Máy' },
-  { path: '/logs', icon: FileText, label: 'Nhật Ký' },
   { path: '/reports', icon: BarChart3, label: 'Báo Cáo' },
 ];
 

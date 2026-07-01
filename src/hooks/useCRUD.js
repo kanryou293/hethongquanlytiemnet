@@ -227,16 +227,14 @@ export function useStaff(initialData) {
 
 export function useExpenses(initialData) {
   return useCRUD(initialData, 'expense', 'expense_id', {
-    create: (data) => api.systemLogs.create(data), // Placeholder
-    update: (id, data) => api.systemLogs.create(data), // Placeholder
-    delete: (id) => Promise.resolve() // Placeholder
+    getAll: () => api.expenses.getAll(),
+    getById: (id) => api.expenses.getById(id),
+    create: (data) => api.expenses.create(data),
+    update: (id, data) => api.expenses.update(id, data),
+    delete: (id) => api.expenses.delete(id),
   });
 }
 
 export function useInventoryImports(initialData) {
-  return useCRUD(initialData, 'inventory_import', 'import_id', {
-    create: (data) => api.systemLogs.create(data), // Placeholder
-    update: (id, data) => api.systemLogs.create(data), // Placeholder
-    delete: (id) => Promise.resolve() // Placeholder
-  });
+  return useCRUD(initialData, 'inventory_import', 'import_id', api.inventoryImports);
 }

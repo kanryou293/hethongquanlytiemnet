@@ -25,6 +25,9 @@ async function fetchAPI(endpoint, options = {}) {
 
     return await response.json();
   } catch (error) {
+    if (error.name === 'AbortError') {
+      throw error;
+    }
     console.error(`API Error [${endpoint}]:`, error);
     throw error;
   }
@@ -165,6 +168,23 @@ export const staffAPI = {
   }),
 };
 
+// Inventory Imports API
+export const inventoryImportsAPI = {
+  getAll: () => fetchAPI('/inventory-imports'),
+  getById: (id) => fetchAPI(`/inventory-imports/${id}`),
+  create: (data) => fetchAPI('/inventory-imports', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  update: (id, data) => fetchAPI(`/inventory-imports/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  }),
+  delete: (id) => fetchAPI(`/inventory-imports/${id}`, {
+    method: 'DELETE',
+  }),
+};
+
 // System Logs API
 export const systemLogsAPI = {
   getAll: (params = {}) => {
@@ -195,7 +215,7 @@ export const expensesAPI = {
     method: 'DELETE',
   }),
   getCategories: () => fetchAPI('/expenses/meta/categories'),
-  getByRange: (startDate, endDate) => fetchAPI(`/expenses/range/${startDate}/${endDate}`),
+  getByRange: (startDate, endDate, signal) => fetchAPI(`/expenses/range/${startDate}/${endDate}`, { signal }),
   getSummaryByCategory: () => fetchAPI('/expenses/summary/by-category'),
 };
 
@@ -216,4 +236,5 @@ export default {
   systemLogs: systemLogsAPI,
   expenses: expensesAPI,
   health: healthAPI,
+  inventoryImports: inventoryImportsAPI,
 };
